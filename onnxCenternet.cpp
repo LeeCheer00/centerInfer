@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <time.h>
 #include <assert.h>
 #include <cmath>
 #include <cuda_runtime_api.h>
@@ -36,7 +37,8 @@ static const int K = 100;
 static const float CENTERNET_THRESH = 0.38;
 
 const std::string CLASSES[OUTPUT_CLS_SIZE + 1]{"Background", "carringbag", "umbrella"}; // background offset
-const std::string img_list = "/home/ubuntu/SSD/software/TensorRT-5.1.2.2/data/centernet/carringBag_calibration.txt";
+// const std::string img_list = "/home/ubuntu/SSD/software/TensorRT-5.1.2.2/data/centernet/carringBag_calibration.txt";
+const std::string img_list = "/home/ubuntu/SSD/lq/tools/test_file.txt";
 
 const char* INPUT_BLOB_NAME = "data";
 const char* OUTPUT_BLOB_NAME0 = "wh";
@@ -77,7 +79,7 @@ float* prepare_image(std::vector<string> infLst, int bs, std::vector<std::pair<i
     {	
         int  offset = singleImageV * j;
         std::string imageName = infLst[j];
-        std::cout << imageName << endl;
+        // std::cout << imageName << endl;
         
         cv::Mat image, im_resize, im_float;
         image = cv::imread(imageName);
@@ -444,9 +446,8 @@ void doInference(IExecutionContext& context, float* input, float* wh, float* reg
 int main(int argc, char** argv) {
 
     // load the local file engine
-    std::string img_list = "/home/ubuntu/SSD/software/TensorRT-5.1.2.2/data/centernet/carringBag_calibration.txt";
     // std::string engine_file = "/home/ubuntu/SSD/software/TensorRT-5.1.2.2/bin/fp16-batch10.engine";
-    std::string engine_file = "/home/ubuntu/SSD/software/TensorRT-5.1.2.2/bin/fp16-batch10.engine";
+    std::string engine_file = "/home/ubuntu/SSD/software/TensorRT-5.1.2.2/bin/int8-onnx-centernet.engine";
     std::ifstream in_file(engine_file.c_str(), std::ios::in | std::ios::binary);
     if (!in_file.is_open()) {
         fprintf(stderr, "fail to open file to write: %s\n", engine_file.c_str());
@@ -482,6 +483,13 @@ int main(int argc, char** argv) {
     float reg[outPutSize];
     float hm[outPutSize];
     float h_max[outPutSize];
+
+
+    // double dur = 0;
+    // double totalDur = 0;
+    clock_t start, finish;
+    start = clock(); 
+    float totalDur = 0;
 	std::vector<std::string> infLst = readTxt(img_list);
     gLogInfo << "Infering...";
     for (int btNm = 0; btNm < int (infLst.size() / batchsize); btNm++){ // todo :when batch is incompelte.
@@ -489,12 +497,17 @@ int main(int argc, char** argv) {
 		std::vector<std::pair<int, int>> WH(batchsize); 
 
 		float *blob = prepare_image(fInBc, batchsize, WH);
+        // start = clock();
     	doInference(*context, blob, wh, reg, hm, h_max, batchsize); 
+        // printf("use Time:%f, %d, %f\n", totalDur/CLOCKS_PER_SEC, batchsize, totalDur/CLOCKS_PER_SEC/batchsize);
 
         // writefeature(wh, reg, hm, h_max, data, batchsize);
-        gLogInfo << "第" << btNm<< "个batch:\n";
+        // gLogInfo << "第" << btNm<< "个batch:\n";
 
         std::vector<float> dets = decode(batchsize, wh, reg, hm, h_max, K);
+        // finish = clock();
+        // dur = double (finish - start);
+		// totalDur += dur;
 
         for (int indInBt = 0; indInBt < batchsize; ++indInBt) {
             // every batch's top K index.
@@ -538,21 +551,52 @@ int main(int argc, char** argv) {
                 objs[j] = ObjLocConf(indInBt, j, clsid, conf, xmin, ymin, xmax, ymax);
             }
             bool res = nms(objs, 0.5);
-            gLogInfo << "\t第" << indInBt << "张图:\n";
+            int imageIndex = btNm * batchsize + indInBt;
+            gLogInfo << infLst[imageIndex] << ":";
             if (res == true) {
-                int rmOjsNum = objs.size();
-
-                for (int i = 0; i < rmOjsNum; i++) {
-                    gLogInfo << "\t\tNMS后:第" << i << "个:";
-                    objs[i].show();
+                int rmOjbsNum = objs.size();
+                int flagC = 0;
+                int flagU = 0;
+                for (int i = 0; i < rmOjbsNum; i++) {
+                    if (objs[i].m_clsid == 1){
+                        gLogInfo << "carringbag,";
+                    	flagC = 1;
+                    }
+                    else if (objs[i].m_clsid == 2){
+                        gLogInfo << "umbrella,";
+                    	flagU = 1;
+                    }
                 }
+                if (flagC && flagU) gLogInfo << "both detected.";
 
-            }else {
-                gLogInfo << "\t\t里没检测到手拎包、雨伞目标\n";
+            }else{
+                gLogInfo << "nothing detected.";
             }
+            gLogInfo << "\n";
+            // gLogInfo << "\t第" << indInBt << "张图:\n";
+            // if (res == true) {
+            //     int rmOjsNum = objs.size();
+
+            //     for (int i = 0; i < rmOjsNum; i++) {
+            //         gLogInfo << "\t\tNMS后:第" << i << "个:";
+            //         objs[i].show();
+            //     }
+
+            // }else {
+            //     gLogInfo << "\t\t里没检测到手拎包、雨伞目标\n";
+            // }
         }
+        // finish = clock();
+        // float Dur = finish - start;
+        // totalDur += Dur;
     }
 
+    finish = clock();
+    totalDur = finish - start;
+    // printf("use Time:%f, %d, %f\n", totalDur/CLOCKS_PER_SEC, infLst.size(), totalDur/CLOCKS_PER_SEC/infLst.size());
+
+
+    // printf("use Time:%f, %d, %f\n", totalDur/CLOCKS_PER_SEC, 590, totalDur/CLOCKS_PER_SEC/590);
     // destroy the engine
     context->destroy();
     engine->destroy();
