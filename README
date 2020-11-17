@@ -1,2 +1,2 @@
-fp16 is done, batchsize is 10.
-int8 is in developing, engine's batch size = 1, more detail see at repo centernetOnnxBuild.
+fp16 is done,
+int8 was finished. engine's batch size = 1 or 10, more detail about engine, see at repo centernetOnnxBuild.
